@@ -83,6 +83,25 @@ func main() {
 }
 
 func handleCompletion(c *gin.Context) {
+	apiKey := os.Getenv("APIKEY")
+	authorizationHeader := c.GetHeader("Authorization")
+
+	if apiKey != "" {
+		if authorizationHeader == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未提供 APIKEY"})
+			return
+		} else if !strings.HasPrefix(authorizationHeader, "Bearer ") {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "APIKEY 格式错误"})
+			return
+		} else {
+			providedToken := strings.TrimPrefix(authorizationHeader, "Bearer ")
+			if providedToken != apiKey {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "APIKEY无效"})
+				return
+			}
+		}
+	}
+
 	var req struct {
 		Model    string `json:"model"`
 		Messages []struct {

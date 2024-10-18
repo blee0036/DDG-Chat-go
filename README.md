@@ -28,6 +28,22 @@ curl -X POST 'https://example.com/v1/chat/completions' \
     "stream": true
   }'
 ```
+## 如果配置了APIKEY
+```
+curl -X POST 'http://localhost:8787/v1/chat/completions' \
+  --header 'Content-Type: application/json' \
+  --header 'Authorization: Bearer skxxxxxx' \
+  --data-raw $'{
+    "messages": [
+      {
+        "role": "user",
+        "content": "你好啊"
+      }
+    ],
+    "model": "gpt-4o-mini",
+    "stream": true
+  }'
+```
 
 ## 参考项目
 [DDG-Chat](https://github.com/leafmoes/DDG-Chat)
