@@ -60,19 +60,3 @@ jobs:
         labels: |
           version=latest
           maintainers=https://blog.lmyself.top
-
-    - name: Build and push with default environment variables
-      uses: docker/build-push-action@v4
-      with:
-        context: .
-        push: true
-        tags: ghcr.io/${{ env.username }}/ddg-chat-go:latest
-        platforms: linux/amd64,linux/arm64
-        labels: |
-          version=latest
-          maintainers=https://blog.lmyself.top
-        build-args: |
-          API_PREFIX=/
-          MAX_RETRY_COUNT=3
-          RETRY_DELAY=5000
-          PORT=8787
