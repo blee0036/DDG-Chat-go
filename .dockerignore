@@ -1,0 +1,9 @@
+# Ignore the Go module files
+go.sum
+go.mod
+
+# Ignore the local environment files
+.env
+
+# Ignore Git files
+.git
