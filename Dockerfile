@@ -1,38 +1,41 @@
-# Use the official Golang image as the builder
+# 使用官方的 Golang 镜像进行构建
 FROM golang:1.22 AS builder
 
-# Set the working directory inside the container
+# 在容器中设置工作目录
 WORKDIR /app
 
-# Copy the go.mod and go.sum files to the working directory
+# 将 go.mod 和 go.sum 复制到工作目录
 COPY go.mod go.sum ./
 
-# Download all dependencies (this will be cached if there are no changes to go.mod)
+# 下载所有依赖（如果 go.mod 没有变化则会使用缓存）
 RUN go mod download
 
-# Copy the source code to the working directory
+# 将源代码复制到工作目录
 COPY . .
 
-# Build the Go application and name the binary 'ddg-chat-go'
-RUN go build -o ddg-chat-go .
+# 静态编译 Go 应用程序，确保兼容 Alpine
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ddg-chat-go .
 
-# Use a smaller base image to reduce the final image size
+# 使用更小的 Alpine 镜像以减小最终镜像体积
 FROM alpine:latest
 
-# Set the working directory inside the container
+# 在容器中设置工作目录
 WORKDIR /root/
 
-# Copy the binary from the builder stage
+# 从构建阶段复制编译好的二进制文件
 COPY --from=builder /app/ddg-chat-go .
 
-# Set default environment variables
+# 设置环境变量
 ENV API_PREFIX="/"         
 ENV MAX_RETRY_COUNT="3"  
 ENV RETRY_DELAY="5000"    
 ENV PORT="8787"
 
-# Expose the port that your app runs on
+# 暴露应用运行的端口
 EXPOSE 8787
 
-# Command to run the executable
+# 确保二进制文件可执行
+RUN chmod +x ddg-chat-go
+
+# 启动二进制文件
 CMD ["./ddg-chat-go"]
