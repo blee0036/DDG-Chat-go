@@ -25,8 +25,11 @@ WORKDIR /root/
 # Copy the binary from the builder stage
 COPY --from=builder /app/ddg-chat-go .
 
-# Copy the .env file if you are using one
-COPY .env .
+# Set default environment variables
+ENV API_PREFIX="/"             # Default API prefix
+ENV MAX_RETRY_COUNT="3"       # Default maximum retry count
+ENV RETRY_DELAY="5000"         # Default retry delay in milliseconds
+ENV PORT="8787"                # Default port
 
 # Expose the port that your app runs on
 EXPOSE 8787

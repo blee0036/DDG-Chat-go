@@ -99,7 +99,7 @@ func handleCompletion(c *gin.Context) {
 
 	model := convertModel(req.Model)
 	content := prepareMessages(req.Messages)
-	log.Printf("messages: %v", content)
+	// log.Printf("messages: %v", content)
 
 	reqBody := map[string]interface{}{
 		"model": model,
@@ -309,7 +309,7 @@ func requestToken() (string, error) {
 		return "", errors.New("响应中未包含x-vqd-4头")
 	}
 
-	log.Printf("获取到的 token: %s\n", token)
+	// log.Printf("获取到的 token: %s\n", token)
 	return token, nil
 }
 
