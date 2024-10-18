@@ -45,5 +45,8 @@ curl -X POST 'http://localhost:8787/v1/chat/completions' \
   }'
 ```
 
+## Serv00部署参考
+[博客](https://blog.lmyself.top/article/6a1de94b-6aee-4556-87f8-0793ca98fe71)
+
 ## 参考项目
 [DDG-Chat](https://github.com/leafmoes/DDG-Chat)
