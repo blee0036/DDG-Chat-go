@@ -16,6 +16,9 @@ jobs:
     - name: List files in the repository
       run: ls -la  # 添加此行以列出文件
 
+    - name: Disable Docker BuildKit
+      run: echo "DOCKER_BUILDKIT=0" >> $GITHUB_ENV
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
