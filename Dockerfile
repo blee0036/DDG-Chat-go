@@ -1,5 +1,5 @@
 # Use the official Golang image as the builder
-FROM golang:1.21 AS builder
+FROM golang:1.22 AS builder
 
 # Set the working directory inside the container
 WORKDIR /app
@@ -26,9 +26,9 @@ WORKDIR /root/
 COPY --from=builder /app/ddg-chat-go .
 
 # Set default environment variables
-ENV API_PREFIX="/"
-ENV MAX_RETRY_COUNT="3"
-ENV RETRY_DELAY="5000"
+ENV API_PREFIX="/"         
+ENV MAX_RETRY_COUNT="3"  
+ENV RETRY_DELAY="5000"    
 ENV PORT="8787"
 
 # Expose the port that your app runs on
