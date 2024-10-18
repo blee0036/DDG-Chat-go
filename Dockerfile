@@ -26,10 +26,10 @@ WORKDIR /root/
 COPY --from=builder /app/ddg-chat-go .
 
 # Set default environment variables
-ENV API_PREFIX="/"             # Default API prefix
-ENV MAX_RETRY_COUNT="3"       # Default maximum retry count
-ENV RETRY_DELAY="5000"         # Default retry delay in milliseconds
-ENV PORT="8787"                # Default port
+ENV API_PREFIX="/"
+ENV MAX_RETRY_COUNT="3"
+ENV RETRY_DELAY="5000"
+ENV PORT="8787"
 
 # Expose the port that your app runs on
 EXPOSE 8787
