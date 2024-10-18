@@ -177,34 +177,41 @@ func handleCompletion(c *gin.Context) {
 					continue
 				}
 
-				// 构建符合要求的流式响应格式
-				response := map[string]interface{}{
-					"id":      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
-					"object":  "chat.completion.chunk",
-					"created": time.Now().Unix(),
-					"model":   model,
-					"choices": []map[string]interface{}{
-						{
-							"index": 0,
-							"delta": map[string]string{
-								"content": chunk["message"].(string),
+				// 检查 chunk 是否包含 message
+				if msg, exists := chunk["message"]; exists && msg != nil {
+					if msgStr, ok := msg.(string); ok {
+						response := map[string]interface{}{
+							"id":      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
+							"object":  "chat.completion.chunk",
+							"created": time.Now().Unix(),
+							"model":   model,
+							"choices": []map[string]interface{}{
+								{
+									"index": 0,
+									"delta": map[string]string{
+										"content": msgStr,
+									},
+									"finish_reason": nil,
+								},
 							},
-							"finish_reason": nil,
-						},
-					},
-				}
+						}
+						// 将响应格式化为 SSE 数据块
+						sseData, _ := json.Marshal(response)
+						sseMessage := fmt.Sprintf("data: %s\n\n", sseData)
 
-				// 将响应格式化为 SSE 数据块
-				sseData, _ := json.Marshal(response)
-				sseMessage := fmt.Sprintf("data: %s\n\n", sseData)
-
-				// 发送数据并刷新缓冲区
-				_, writeErr := c.Writer.Write([]byte(sseMessage))
-				if writeErr != nil {
-					log.Printf("写入响应失败: %v", writeErr)
-					break
+						// 发送数据并刷新缓冲区
+						_, writeErr := c.Writer.Write([]byte(sseMessage))
+						if writeErr != nil {
+							log.Printf("写入响应失败: %v", writeErr)
+							break
+						}
+						flusher.Flush()
+					} else {
+						log.Printf("chunk[message] 不是字符串: %v", msg)
+					}
+				} else {
+					log.Println("chunk 中未包含 message 或 message 为 nil")
 				}
-				flusher.Flush()
 			}
 		}
 	} else {
