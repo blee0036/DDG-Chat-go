@@ -13,3 +13,6 @@ docker run --name ddg-chat-go -p 8787:8787 \
   lmyself/ddg-chat-go:latest
 
 ```
+
+## 参考项目
+[DDG-Chat](https://github.com/leafmoes/DDG-Chat)
