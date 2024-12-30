@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ type Config struct {
 	MaxRetryCount int
 	RetryDelay    time.Duration
 	FakeHeaders   map[string]string
+	ProxyURL      string
 }
 
 var config Config
@@ -29,25 +31,26 @@ func init() {
 	godotenv.Load()
 	config = Config{
 		APIPrefix:     getEnv("API_PREFIX", "/"),
-		MaxRetryCount: getIntEnv("MAX_RETRY_COUNT", 3),
-		RetryDelay:    getDurationEnv("RETRY_DELAY", 5000),
-		FakeHeaders: map[string]string{
-			"Accept":             "*/*",
-			"Accept-Encoding":    "gzip, deflate, br, zstd",
-			"Accept-Language":    "zh-CN,zh;q=0.9",
-			"Origin":             "https://duckduckgo.com/",
-			"Cookie":             "l=wt-wt; ah=wt-wt; dcm=6",
-			"Dnt":                "1",
-			"Priority":           "u=1, i",
-			"Referer":            "https://duckduckgo.com/",
-			"Sec-Ch-Ua":          `"Microsoft Edge";v="129", "Not(A:Brand";v="8", "Chromium";v="129"`,
-			"Sec-Ch-Ua-Mobile":   "?0",
-			"Sec-Ch-Ua-Platform": `"Windows"`,
-			"Sec-Fetch-Dest":     "empty",
-			"Sec-Fetch-Mode":     "cors",
-			"Sec-Fetch-Site":     "same-origin",
-			"User-Agent":         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
-		},
+			MaxRetryCount: getIntEnv("MAX_RETRY_COUNT", 3),
+			RetryDelay:    getDurationEnv("RETRY_DELAY", 5000),
+			ProxyURL:      getEnv("PROXY_URL", ""),
+			FakeHeaders: map[string]string{
+				"Accept":             "*/*",
+				"Accept-Encoding":    "gzip, deflate, br, zstd",
+				"Accept-Language":    "zh-CN,zh;q=0.9",
+				"Origin":             "https://duckduckgo.com/",
+				"Cookie":             "l=wt-wt; ah=wt-wt; dcm=6",
+				"Dnt":                "1",
+				"Priority":           "u=1, i",
+				"Referer":            "https://duckduckgo.com/",
+				"Sec-Ch-Ua":          `"Microsoft Edge";v="129", "Not(A:Brand";v="8", "Chromium";v="129"`,
+				"Sec-Ch-Ua-Mobile":   "?0",
+				"Sec-Ch-Ua-Platform": `"Windows"`,
+				"Sec-Fetch-Dest":     "empty",
+				"Sec-Fetch-Mode":     "cors",
+				"Sec-Fetch-Site":     "same-origin",
+				"User-Agent":         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+			},
 	}
 }
 
@@ -154,9 +157,7 @@ func handleCompletion(c *gin.Context) {
 	upstreamReq.Header.Set("x-vqd-4", token)
 	upstreamReq.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
+	client := createHTTPClient(30 * time.Second)
 
 	resp, err := client.Do(upstreamReq)
 	if err != nil {
@@ -305,9 +306,7 @@ func requestToken() (string, error) {
 	}
 	req.Header.Set("x-vqd-accept", "1")
 
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
+	client := createHTTPClient(10 * time.Second)
 
 	log.Println("发送 token 请求")
 	resp, err := client.Do(req)
@@ -413,4 +412,23 @@ func getIntEnv(key string, fallback int) int {
 
 func getDurationEnv(key string, fallback int) time.Duration {
 	return time.Duration(getIntEnv(key, fallback)) * time.Millisecond
+}
+
+func createHTTPClient(timeout time.Duration) *http.Client {
+	client := &http.Client{
+		Timeout: timeout,
+	}
+	
+	if config.ProxyURL != "" {
+		proxyURL, err := url.Parse(config.ProxyURL)
+		if err != nil {
+			log.Printf("代理URL解析失败: %v", err)
+			return client
+		}
+		client.Transport = &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+		}
+	}
+	
+	return client
 }
