@@ -39,17 +39,17 @@ func init() {
 				"Accept-Encoding":    "gzip, deflate, br, zstd",
 				"Accept-Language":    "zh-CN,zh;q=0.9",
 				"Origin":             "https://duckduckgo.com/",
-				"Cookie":             "l=wt-wt; ah=wt-wt; dcm=6",
+				"Cookie":             "dcm=3",
 				"Dnt":                "1",
 				"Priority":           "u=1, i",
 				"Referer":            "https://duckduckgo.com/",
-				"Sec-Ch-Ua":          `"Microsoft Edge";v="129", "Not(A:Brand";v="8", "Chromium";v="129"`,
+				"Sec-Ch-Ua":          `"Chromium";v="130", "Microsoft Edge";v="130", "Not?A_Brand";v="99"`,
 				"Sec-Ch-Ua-Mobile":   "?0",
 				"Sec-Ch-Ua-Platform": `"Windows"`,
 				"Sec-Fetch-Dest":     "empty",
 				"Sec-Fetch-Mode":     "cors",
 				"Sec-Fetch-Site":     "same-origin",
-				"User-Agent":         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+				"User-Agent":         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
 			},
 	}
 }
@@ -70,8 +70,9 @@ func main() {
 		models := []gin.H{
 			{"id": "gpt-4o-mini", "object": "model", "owned_by": "ddg"},
 			{"id": "claude-3-haiku", "object": "model", "owned_by": "ddg"},
-			{"id": "llama-3.1-70b", "object": "model", "owned_by": "ddg"},
+			{"id": "llama-3.3-70b", "object": "model", "owned_by": "ddg"},
 			{"id": "mixtral-8x7b", "object": "model", "owned_by": "ddg"},
+			{"id": "o3-mini", "object": "model", "owned_by": "ddg"},
 		}
 		c.JSON(http.StatusOK, gin.H{"object": "list", "data": models})
 	})
@@ -121,179 +122,237 @@ func handleCompletion(c *gin.Context) {
 
 	model := convertModel(req.Model)
 	content := prepareMessages(req.Messages)
-	// log.Printf("messages: %v", content)
 
-	reqBody := map[string]interface{}{
-		"model": model,
-		"messages": []map[string]interface{}{
-			{
-				"role":    "user",
-				"content": content,
-			},
-		},
-	}
+	var retryCount = 0
+	var lastError error
 
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("请求体序列化失败: %v", err)})
-		return
-	}
-
-	token, err := requestToken()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法获取token"})
-		return
-	}
-
-	upstreamReq, err := http.NewRequest("POST", "https://duckduckgo.com/duckchat/v1/chat", strings.NewReader(string(body)))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("创建请求失败: %v", err)})
-		return
-	}
-
-	for k, v := range config.FakeHeaders {
-		upstreamReq.Header.Set(k, v)
-	}
-	upstreamReq.Header.Set("x-vqd-4", token)
-	upstreamReq.Header.Set("Content-Type", "application/json")
-
-	client := createHTTPClient(30 * time.Second)
-
-	resp, err := client.Do(upstreamReq)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("请求失败: %v", err)})
-		return
-	}
-	defer resp.Body.Close()
-
-	if req.Stream {
-		// 启用 SSE 流式响应
-		c.Writer.Header().Set("Content-Type", "text/event-stream")
-		c.Writer.Header().Set("Cache-Control", "no-cache")
-		c.Writer.Header().Set("Connection", "keep-alive")
-
-		flusher, ok := c.Writer.(http.Flusher)
-		if !ok {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Streaming not supported"})
-			return
+	for retryCount <= config.MaxRetryCount {
+		if retryCount > 0 {
+			log.Printf("重试中... 次数: %d", retryCount)
+			time.Sleep(config.RetryDelay)
 		}
 
-		reader := bufio.NewReader(resp.Body)
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				if err != io.EOF {
-					log.Printf("读取流式响应失败: %v", err)
-				}
-				break
-			}
-
-			if strings.HasPrefix(line, "data: ") {
-				// 解析响应中的 JSON 数据块
-				line = strings.TrimPrefix(line, "data: ")
-				var chunk map[string]interface{}
-				if err := json.Unmarshal([]byte(line), &chunk); err != nil {
-					log.Printf("解析响应行失败: %v", err)
-					continue
-				}
-
-				// 检查 chunk 是否包含 message
-				if msg, exists := chunk["message"]; exists && msg != nil {
-					if msgStr, ok := msg.(string); ok {
-						response := map[string]interface{}{
-							"id":      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
-							"object":  "chat.completion.chunk",
-							"created": time.Now().Unix(),
-							"model":   model,
-							"choices": []map[string]interface{}{
-								{
-									"index": 0,
-									"delta": map[string]string{
-										"content": msgStr,
-									},
-									"finish_reason": nil,
-								},
-							},
-						}
-						// 将响应格式化为 SSE 数据块
-						sseData, _ := json.Marshal(response)
-						sseMessage := fmt.Sprintf("data: %s\n\n", sseData)
-
-						// 发送数据并刷新缓冲区
-						_, writeErr := c.Writer.Write([]byte(sseMessage))
-						if writeErr != nil {
-							log.Printf("写入响应失败: %v", writeErr)
-							break
-						}
-						flusher.Flush()
-					} else {
-						log.Printf("chunk[message] 不是字符串: %v", msg)
-					}
-				} else {
-					log.Println("chunk 中未包含 message 或 message 为 nil")
-				}
-			}
-		}
-	} else {
-		// 非流式响应，返回完整的 JSON
-		var fullResponse strings.Builder
-		reader := bufio.NewReader(resp.Body)
-
-		for {
-			line, err := reader.ReadString('\n')
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				log.Printf("读取响应失败: %v", err)
-				break
-			}
-
-			if strings.HasPrefix(line, "data: ") {
-				line = strings.TrimPrefix(line, "data: ")
-				line = strings.TrimSpace(line)
-
-				if line == "[DONE]" {
-					break
-				}
-
-				var chunk map[string]interface{}
-				if err := json.Unmarshal([]byte(line), &chunk); err != nil {
-					log.Printf("解析响应行失败: %v", err)
-					continue
-				}
-
-				if message, exists := chunk["message"]; exists {
-					if msgStr, ok := message.(string); ok {
-						fullResponse.WriteString(msgStr)
-					}
-				}
-			}
+		token, err := requestToken()
+		if err != nil {
+			lastError = fmt.Errorf("无法获取token: %v", err)
+			retryCount++
+			continue
 		}
 
-		// 返回完整 JSON 响应
-		response := map[string]interface{}{
-			"id":      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
-			"object":  "chat.completion",
-			"created": time.Now().Unix(),
-			"model":   model,
-			"usage": map[string]int{
-				"prompt_tokens":     0,
-				"completion_tokens": 0,
-				"total_tokens":      0,
-			},
-			"choices": []map[string]interface{}{
+		reqBody := map[string]interface{}{
+			"model": model,
+			"messages": []map[string]interface{}{
 				{
-					"message": map[string]string{
-						"role":    "assistant",
-						"content": fullResponse.String(),
-					},
-					"index": 0,
+					"role":    "user",
+					"content": content,
 				},
 			},
 		}
 
-		c.JSON(http.StatusOK, response)
+		body, err := json.Marshal(reqBody)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("请求体序列化失败: %v", err)})
+			return
+		}
+
+		upstreamReq, err := http.NewRequest("POST", "https://duckduckgo.com/duckchat/v1/chat", strings.NewReader(string(body)))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("创建请求失败: %v", err)})
+			return
+		}
+
+		for k, v := range config.FakeHeaders {
+			upstreamReq.Header.Set(k, v)
+		}
+		upstreamReq.Header.Set("x-vqd-4", token)
+		upstreamReq.Header.Set("Content-Type", "application/json")
+		upstreamReq.Header.Set("Accept", "text/event-stream")
+
+		client := createHTTPClient(30 * time.Second)
+		resp, err := client.Do(upstreamReq)
+		if err != nil {
+			lastError = fmt.Errorf("请求失败: %v", err)
+			retryCount++
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			lastError = fmt.Errorf("非200响应: %d, 内容: %s", resp.StatusCode, string(bodyBytes))
+			retryCount++
+			continue
+		}
+
+		// 处理响应
+		if err := handleResponse(c, resp, req.Stream, model); err != nil {
+			lastError = err
+			retryCount++
+			continue
+		}
+
+		return
 	}
+
+	// 如果所有重试都失败了
+	c.JSON(http.StatusInternalServerError, gin.H{"error": lastError.Error()})
+}
+
+func handleResponse(c *gin.Context, resp *http.Response, isStream bool, model string) error {
+	if isStream {
+		return handleStreamResponse(c, resp, model)
+	}
+	return handleNonStreamResponse(c, resp, model)
+}
+
+func handleStreamResponse(c *gin.Context, resp *http.Response, model string) error {
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		return errors.New("Streaming not supported")
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("读取流式响应失败: %v", err)
+			}
+			break
+		}
+
+		if strings.HasPrefix(line, "data: ") {
+			line = strings.TrimPrefix(line, "data: ")
+			line = strings.TrimSpace(line)
+
+			if line == "[DONE]" {
+				response := map[string]interface{}{
+					"id":      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
+					"object":  "chat.completion.chunk",
+					"created": time.Now().Unix(),
+					"model":   model,
+					"choices": []map[string]interface{}{
+						{
+							"index":         0,
+							"finish_reason": "stop",
+						},
+					},
+				}
+				sseData, _ := json.Marshal(response)
+				sseMessage := fmt.Sprintf("data: %s\n\n", sseData)
+				if _, err := c.Writer.Write([]byte(sseMessage)); err != nil {
+					return fmt.Errorf("写入响应失败: %v", err)
+				}
+				flusher.Flush()
+				break
+			}
+
+			var chunk map[string]interface{}
+			if err := json.Unmarshal([]byte(line), &chunk); err != nil {
+				log.Printf("解析响应行失败: %v", err)
+				continue
+			}
+
+			if chunk["action"] != "success" {
+				continue
+			}
+
+			if msg, exists := chunk["message"]; exists && msg != nil {
+				if msgStr, ok := msg.(string); ok {
+					response := map[string]interface{}{
+						"id":      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
+						"object":  "chat.completion.chunk",
+						"created": time.Now().Unix(),
+						"model":   model,
+						"choices": []map[string]interface{}{
+							{
+								"index": 0,
+								"delta": map[string]string{
+									"content": msgStr,
+								},
+								"finish_reason": nil,
+							},
+						},
+					}
+					sseData, _ := json.Marshal(response)
+					sseMessage := fmt.Sprintf("data: %s\n\n", sseData)
+
+					if _, err := c.Writer.Write([]byte(sseMessage)); err != nil {
+						return fmt.Errorf("写入响应失败: %v", err)
+					}
+					flusher.Flush()
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func handleNonStreamResponse(c *gin.Context, resp *http.Response, model string) error {
+	var fullResponse strings.Builder
+	reader := bufio.NewReader(resp.Body)
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return fmt.Errorf("读取响应失败: %v", err)
+		}
+
+		if strings.HasPrefix(line, "data: ") {
+			line = strings.TrimPrefix(line, "data: ")
+			line = strings.TrimSpace(line)
+
+			if line == "[DONE]" {
+				break
+			}
+
+			var chunk map[string]interface{}
+			if err := json.Unmarshal([]byte(line), &chunk); err != nil {
+				log.Printf("解析响应行失败: %v", err)
+				continue
+			}
+
+			if chunk["action"] != "success" {
+				continue
+			}
+
+			if msg, exists := chunk["message"]; exists && msg != nil {
+				if msgStr, ok := msg.(string); ok {
+					fullResponse.WriteString(msgStr)
+				}
+			}
+		}
+	}
+
+	response := map[string]interface{}{
+		"id":      "chatcmpl-QXlha2FBbmROaXhpZUFyZUF3ZXNvbWUK",
+		"object":  "chat.completion",
+		"created": time.Now().Unix(),
+		"model":   model,
+		"usage": map[string]int{
+			"prompt_tokens":     0,
+			"completion_tokens": 0,
+			"total_tokens":      0,
+		},
+		"choices": []map[string]interface{}{
+			{
+				"message": map[string]string{
+					"role":    "assistant",
+					"content": fullResponse.String(),
+				},
+				"index": 0,
+			},
+		},
+	}
+
+	c.JSON(http.StatusOK, response)
+	return nil
 }
 
 func requestToken() (string, error) {
@@ -372,10 +431,12 @@ func convertModel(inputModel string) string {
 	switch strings.ToLower(inputModel) {
 	case "claude-3-haiku":
 		return "claude-3-haiku-20240307"
-	case "llama-3.1-70b":
-		return "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+	case "llama-3.3-70b":
+		return "meta-llama/Llama-3.3-70B-Instruct-Turbo"
 	case "mixtral-8x7b":
 		return "mistralai/Mixtral-8x7B-Instruct-v0.1"
+	case "o3-mini":
+		return "o3-mini"
 	default:
 		return "gpt-4o-mini"
 	}
