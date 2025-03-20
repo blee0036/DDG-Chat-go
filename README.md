@@ -248,7 +248,7 @@ print(response.choices[0].message.content)
 
 ## 许可证
 
-MIT License
+[MIT License](./LICENSE)
 
 ## 维护与贡献
 
