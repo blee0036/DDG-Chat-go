@@ -10,6 +10,6 @@ WORKDIR /root/
 COPY --from=builder /app/ddg-chat-api .
 EXPOSE 8787
 
-RUN chmod +x ddg-chat-go
+RUN chmod +x ddg-chat-api
 
 CMD ["./ddg-chat-api"]
