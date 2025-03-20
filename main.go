@@ -39,23 +39,27 @@ func init() {
 				"Accept-Encoding":    "gzip, deflate, br, zstd",
 				"Accept-Language":    "zh-CN,zh;q=0.9",
 				"Origin":             "https://duckduckgo.com/",
-				"Cookie":             "dcm=3",
-				"Dnt":                "1",
+				"Cookie":             "dcm=3; dcs=1",
 				"Priority":           "u=1, i",
 				"Referer":            "https://duckduckgo.com/",
-				"Sec-Ch-Ua":          `"Chromium";v="130", "Microsoft Edge";v="130", "Not?A_Brand";v="99"`,
+				"Sec-Ch-Ua":          `"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"`,
 				"Sec-Ch-Ua-Mobile":   "?0",
 				"Sec-Ch-Ua-Platform": `"Windows"`,
 				"Sec-Fetch-Dest":     "empty",
 				"Sec-Fetch-Mode":     "cors",
 				"Sec-Fetch-Site":     "same-origin",
-				"User-Agent":         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
+				"User-Agent":         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
 			},
 	}
 }
 
 func main() {
 	r := gin.Default()
+	
+	// Try to disable trusting proxies if the version supports it
+	// Uncomment this if your Gin version supports it
+	// r.ForwardedByClientIP = false
+	
 	r.Use(corsMiddleware())
 
 	r.GET("/", func(c *gin.Context) {
@@ -71,7 +75,7 @@ func main() {
 			{"id": "gpt-4o-mini", "object": "model", "owned_by": "ddg"},
 			{"id": "claude-3-haiku", "object": "model", "owned_by": "ddg"},
 			{"id": "llama-3.3-70b", "object": "model", "owned_by": "ddg"},
-			{"id": "mixtral-8x7b", "object": "model", "owned_by": "ddg"},
+			{"id": "mistral-small", "object": "model", "owned_by": "ddg"},
 			{"id": "o3-mini", "object": "model", "owned_by": "ddg"},
 		}
 		c.JSON(http.StatusOK, gin.H{"object": "list", "data": models})
@@ -132,7 +136,7 @@ func handleCompletion(c *gin.Context) {
 			time.Sleep(config.RetryDelay)
 		}
 
-		token, err := requestToken()
+		token, vqdHash, err := requestTokenAndHash()
 		if err != nil {
 			lastError = fmt.Errorf("无法获取token: %v", err)
 			retryCount++
@@ -165,6 +169,9 @@ func handleCompletion(c *gin.Context) {
 			upstreamReq.Header.Set(k, v)
 		}
 		upstreamReq.Header.Set("x-vqd-4", token)
+		if vqdHash != "" {
+			upstreamReq.Header.Set("x-vqd-hash-1", vqdHash)
+		}
 		upstreamReq.Header.Set("Content-Type", "application/json")
 		upstreamReq.Header.Set("Accept", "text/event-stream")
 
@@ -356,9 +363,14 @@ func handleNonStreamResponse(c *gin.Context, resp *http.Response, model string) 
 }
 
 func requestToken() (string, error) {
+	token, _, err := requestTokenAndHash()
+	return token, err
+}
+
+func requestTokenAndHash() (string, string, error) {
 	req, err := http.NewRequest("GET", "https://duckduckgo.com/duckchat/v1/status", nil)
 	if err != nil {
-		return "", fmt.Errorf("创建请求失败: %v", err)
+		return "", "", fmt.Errorf("创建请求失败: %v", err)
 	}
 	for k, v := range config.FakeHeaders {
 		req.Header.Set(k, v)
@@ -370,7 +382,7 @@ func requestToken() (string, error) {
 	log.Println("发送 token 请求")
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("请求失败: %v", err)
+		return "", "", fmt.Errorf("请求失败: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -378,16 +390,44 @@ func requestToken() (string, error) {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		bodyString := string(bodyBytes)
 		log.Printf("requestToken: 非200响应: %d, 内容: %s\n", resp.StatusCode, bodyString)
-		return "", fmt.Errorf("非200响应: %d, 内容: %s", resp.StatusCode, bodyString)
+		return "", "", fmt.Errorf("非200响应: %d, 内容: %s", resp.StatusCode, bodyString)
 	}
 
+	// 从响应头中获取令牌
 	token := resp.Header.Get("x-vqd-4")
 	if token == "" {
-		return "", errors.New("响应中未包含x-vqd-4头")
+		return "", "", errors.New("响应中未包含x-vqd-4头")
 	}
 
-	// log.Printf("获取到的 token: %s\n", token)
-	return token, nil
+	// 从响应头中获取x-vqd-hash-1
+	vqdHash := resp.Header.Get("x-vqd-hash-1")
+	if vqdHash == "" {
+		// 尝试从响应体中获取
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Printf("读取响应体失败: %v", err)
+		} else {
+			// 记录响应体以便调试
+			log.Printf("响应体: %s", string(bodyBytes))
+			
+			// 尝试从JSON响应中解析可能包含的哈希值
+			var respObj map[string]interface{}
+			if err := json.Unmarshal(bodyBytes, &respObj); err == nil {
+				if hashValue, ok := respObj["x-vqd-hash-1"].(string); ok {
+					vqdHash = hashValue
+				}
+			}
+		}
+	}
+	
+	log.Printf("获取到的 token: %s", token)
+	if vqdHash != "" {
+		log.Printf("获取到的 hash: %s", vqdHash)
+	} else {
+		log.Println("未获取到 hash 值")
+	}
+	
+	return token, vqdHash, nil
 }
 
 func prepareMessages(messages []struct {
@@ -433,8 +473,8 @@ func convertModel(inputModel string) string {
 		return "claude-3-haiku-20240307"
 	case "llama-3.3-70b":
 		return "meta-llama/Llama-3.3-70B-Instruct-Turbo"
-	case "mixtral-8x7b":
-		return "mistralai/Mixtral-8x7B-Instruct-v0.1"
+	case "mistral-small":
+		return "mistralai/Mistral-Small-24B-Instruct-2501"
 	case "o3-mini":
 		return "o3-mini"
 	default:
