@@ -1,62 +1,65 @@
-name: Build and Push Docker Image
+name: Publish Docker image (arm64)
 
 on:
-  release:
-    types: [created] # 表示在创建新的 Release 时触发
-  workflow_dispatch:    # 手动触发（可选）
+  push:
+    tags:
+      - '*'
+  workflow_dispatch:
+    inputs:
+      name:
+        description: 'reason'
+        required: false
+env:
+  REGISTRY: ghcr.io
+  IMAGE: blee0036/ddg-chat-go
 
 jobs:
-  build:
+  push_to_registries:
+    name: Push Docker image to multiple registries
     runs-on: ubuntu-latest
-
+    permissions:
+      packages: write
+      contents: read
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - name: Check out the repo
+        uses: actions/checkout@v3
 
-    - name: List files in the repository
-      run: ls -la  # 列出文件以确保必要的文件存在
+      - name: Save version info
+        run: |
+          git describe --tags > VERSION 
 
-    - name: Disable Docker BuildKit
-      run: echo "DOCKER_BUILDKIT=0" >> $GITHUB_ENV
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
 
-    - name: Log in to Docker Hub
-      uses: docker/login-action@v2
-      with:
-        username: ${{ secrets.DOCKER_HUB_USERNAME }}
-        password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+      - name: Set up Go 1.23
+        uses: actions/setup-go@v4
+        with:
+          go-version: 1.23
 
-    - name: Log in to GitHub Container Registry
-      uses: docker/login-action@v2
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Convert GitHub username to lowercase
-      id: lowercase_username
-      run: echo "username=$(echo ${{ github.actor }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=ref,event=tag
 
-    - name: Build and push to Docker Hub
-      uses: docker/build-push-action@v4
-      with:
-        context: .
-        push: true
-        tags: ${{ secrets.DOCKER_HUB_USERNAME }}/ddg-chat-go:latest
-        platforms: linux/amd64,linux/arm64
-        labels: |
-          version=latest
-          maintainers=https://blog.lmyself.top
-
-    - name: Build and push to GitHub Packages
-      uses: docker/build-push-action@v4
-      with:
-        context: .
-        push: true
-        tags: ghcr.io/${{ env.username }}/ddg-chat-go:latest
-        platforms: linux/amd64,linux/arm64
-        labels: |
-          version=latest
-          maintainers=https://blog.lmyself.top
+      - name: Build and push Docker images
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
